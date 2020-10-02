@@ -26,7 +26,7 @@
 
 提交三份文件到task 1：
 
-（1）CmakeList.txt
+（1）CMakeList.txt
 
 （2）main.cpp
 
