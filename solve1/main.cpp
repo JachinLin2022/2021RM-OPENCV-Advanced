@@ -198,7 +198,7 @@ bool selectMethod(std::vector<cv::Point2f> &get_list)
     constexpr double div_high = 15;         //长宽比上界
     constexpr double div_low = 3.1;         //长宽比下界
     constexpr double square_low = 800;      //面积下界
-    constexpr double sin_low = sqrt(2) / 2; //倾斜的sin下界
+    const double sin_low = sqrt(2) / 2; //倾斜的sin下界
     //获得长边和短边
     double max_value = std::max(pointDis(get_list[0], get_list[1]), pointDis(get_list[1], get_list[2]));
     double min_value = std::min(pointDis(get_list[0], get_list[1]), pointDis(get_list[1], get_list[2]));
@@ -303,6 +303,14 @@ RectAreaList matchRect(cv::Mat &bin_img, const RectAreaList &rect_list)
         auto p1 = rectCenter(rect_list[i]);
         auto p2 = rectCenter(rect_list[i + 1]);
         //因为是排好序的，所以如果p1.x大的话说明是换行的情况，如果是相邻的话则检测中心区域
+        /*
+        1 2 3 4
+        5 6 7 8
+        例如对于以上8个排好序并且标好号的灯条来说，依次遍历，首先尝试配对1号2号
+        发现2号x大，继续检测1号2号之间是否可能为数字，如果是，则下次匹配3号4号
+        否则，匹配2号3号
+        当假如配对到4号5号时，则会出现5号的x小，这种情况一定不存在，因为灯条已经按照y和x的顺序排好了序，所以这种不予匹配
+        */
         if (p1.x < p2.x && judgeWhite(bin_img, midPoint(p1, p2)))
         {
             match_rect.push_back(rect_list[i]);
