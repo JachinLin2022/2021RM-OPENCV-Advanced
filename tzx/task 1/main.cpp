@@ -24,6 +24,17 @@ public:
     float aspectRatio() const { return _aspectRatio ? _aspectRatio : _aspectRatio = height() / width(); }
     float area() const { return _area ? _area : _area = RotatedRect::size.area(); }
 
+    void draw(Mat img, const Scalar &color, int thickness = 1)
+    {
+        Point2f vertices[4];
+        this->points(vertices);
+        for (int i = 0; i < 4; i++)
+        {
+            line(img, vertices[i], vertices[(i + 1) % 4], color, thickness);
+        }
+        // putText(img, std::to_string(this->size.area()), vertices[0], FONT_HERSHEY_SCRIPT_SIMPLEX, 1, Scalar(66, 0xcc, 0xff)); // for debug
+    }
+
 private:
     mutable float _height = 0, _width = 0, _angleT = 0, _aspectRatio = 0, _area = 0;
 };
@@ -53,17 +64,6 @@ bool isLedLight(const MyRotatedRect &rect, const Mat &img)
     return true;
 }
 
-void drawRotatedRect(Mat img, const RotatedRect &rect, const Scalar &color, int thickness = 1)
-{
-    Point2f vertices[4];
-    rect.points(vertices);
-    for (int i = 0; i < 4; i++)
-    {
-        line(img, vertices[i], vertices[(i + 1) % 4], color, thickness);
-    }
-    // putText(img, std::to_string(rect.size.area()), vertices[0], FONT_HERSHEY_SCRIPT_SIMPLEX, 1, Scalar(66, 0xcc, 0xff)); // for debug
-}
-
 std::vector<MyRotatedRect> findContourRect(Mat hsvImg, InputArray lowerb, InputArray upperb)
 {
     Mat mask;
@@ -91,7 +91,7 @@ Scalar hsvToOpencvHsv(double h, double s, double v)
     return {h / 2, s * 255, v * 255};
 }
 
-float euclideanDist(const Point &p, const Point &q)
+float euclideanDistSquare(const Point &p, const Point &q)
 {
     Point diff = p - q;
     return sqrt(diff.x * diff.x + diff.y * diff.y);
@@ -118,7 +118,7 @@ std::vector<Armor> findArmor(const std::vector<MyRotatedRect> &lights)
                 continue;
             }
 
-            float centerDist = euclideanDist(light0.center, light1.center);
+            float centerDist = euclideanDistSquare(light0.center, light1.center);
             float avgheight = (light0.height() + light1.height()) / 2;
             float aspectRatio = centerDist / avgheight;
             if (aspectRatio > 4)
@@ -161,7 +161,7 @@ int main()
     {
         for (auto &&contour : contours[i])
         {
-            drawRotatedRect(tmpImg, contour, Scalar(0, 255, 255), 3);
+            contour.draw(tmpImg, Scalar(0, 255, 255), 3);
             if (isLedLight(contour, img))
             {
                 lights[i].push_back(contour);
@@ -177,7 +177,7 @@ int main()
     {
         for (auto &&light : lights[i])
         {
-            drawRotatedRect(tmpImg, light, Scalar(0, 255, 255), 3);
+            light.draw(tmpImg, Scalar(0, 255, 255), 3);
         }
     }
     imshow("3-筛选轮廓", tmpImg);
@@ -186,11 +186,11 @@ int main()
 
     for (auto &&light : lights[0])
     {
-        drawRotatedRect(img, light, Scalar(0, 255, 0), 3);
+        light.draw(img, Scalar(0, 255, 0), 3);
     }
     for (auto &&light : lights[1])
     {
-        drawRotatedRect(img, light, Scalar(0, 0, 255), 3);
+        light.draw(img, Scalar(0, 0, 255), 3);
     }
     imshow("4-找到灯条", img);
     imwrite("4-找到灯条.jpg", img);
@@ -206,8 +206,8 @@ int main()
         {
             auto randColor = []() { return rand() % 255; };
             auto color = Scalar(randColor(), randColor(), randColor());
-            drawRotatedRect(tmpImg, armor.lights[0], color, 3);
-            drawRotatedRect(tmpImg, armor.lights[1], color, 3);
+            armor.lights[0].draw(tmpImg, color, 3);
+            armor.lights[1].draw(tmpImg, color, 3);
         }
     }
     imshow("5-配对灯条", tmpImg);
@@ -216,11 +216,11 @@ int main()
 
     for (auto &&armor : armors[0])
     {
-        drawRotatedRect(img, armor, Scalar(255, 255, 0), 3);
+        armor.draw(img, Scalar(255, 255, 0), 3);
     }
     for (auto &&armor : armors[1])
     {
-        drawRotatedRect(img, armor, Scalar(255, 0, 255), 3);
+        armor.draw(img, Scalar(255, 0, 255), 3);
     }
     imshow("6-装甲板位置", img);
     imwrite("armor.jpg", img);
