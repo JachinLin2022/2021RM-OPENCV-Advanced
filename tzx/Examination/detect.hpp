@@ -34,135 +34,191 @@ public:
         {
             line(img, vertices[i], vertices[(i + 1) % 4], color, thickness);
         }
-        // putText(img, to_string(this->size.area()), vertices[0], FONT_HERSHEY_SCRIPT_SIMPLEX, 1, Scalar(66, 0xcc, 0xff)); // for debug
+
+        // putText(img, to_string(debugInfo), vertices[0], FONT_HERSHEY_SCRIPT_SIMPLEX, 1, Scalar(66, 0xcc, 0xff)); // for debug
     }
 
 private:
     mutable float _height = 0, _width = 0, _angleT = 0, _aspectRatio = 0, _area = 0;
 };
 
+struct Light : MyRotatedRect
+{
+    using MyRotatedRect::MyRotatedRect;
+    struct Armor* belongTo = NULL;
+};
+
 struct Armor : MyRotatedRect
 {
     using MyRotatedRect::MyRotatedRect;
-    vector<MyRotatedRect> lights;
+    vector<Light> lights;
+    void addLight(Light& light){
+        light.belongTo = this;
+        lights.push_back(light);
+    }
 };
 
-bool isLedLight(const MyRotatedRect &rect, const Mat &img)
+inline int euclideanDistSquare(const Point &p, const Point &q)
 {
-    if (rect.angleT() < 45 || rect.angleT() > 135)
-    {
-        return false;
-    }
+    Point diff = p - q;
+    return diff.x * diff.x + diff.y * diff.y;
+}
 
-    if (rect.area() < 800.0 * img.size[0] * img.size[1] / 4497 / 3000)
-    {
-        return false;
-    }
+bool isLedLight(const vector<Point> &contour, const Mat &img, MyRotatedRect &resultRect)
+{
+    auto rect = (MyRotatedRect)minAreaRect(contour);
 
+#if 1
+    // 长宽比过滤
     if (rect.aspectRatio() < 3)
     {
         return false;
     }
+#endif
+
+#if 1
+    // 倾斜角度过滤
+    if (rect.angleT() < 45 || rect.angleT() > 135)
+    {
+        return false;
+    }
+#endif
+
+#if 1
+    // 面积过滤
+    double areaRatio = rect.area() / img.size().area();
+    if (areaRatio < 0.00005)
+    {
+        return false;
+    }
+#endif
+
+#if 1
+    // 占比过滤
+    double cArea = contourArea(contour, false);
+    double cAreaRatio = cArea / rect.area();
+    if (isnan(cAreaRatio) || cAreaRatio < 0.7) { 
+        return false; 
+    }
+#endif
+
+    resultRect = rect;
     return true;
 }
 
-vector<MyRotatedRect> findLights(Mat hsvImg, InputArray lowerb, InputArray upperb)
+vector<Light> findLights(Mat hsvImg, InputArray lowerb, InputArray upperb)
 {
     Mat mask;
     inRange(hsvImg, lowerb, upperb, mask);
 
     vector<vector<Point>> contours;
-    findContours(mask, contours, RETR_EXTERNAL, CHAIN_APPROX_NONE);
+    findContours(mask, contours, RETR_EXTERNAL, CHAIN_APPROX_SIMPLE);
 
-    vector<MyRotatedRect> lights;
+    vector<Light> lights;
     for (auto &&contour : contours)
     {
-        auto rect = minAreaRect(contour);
-        if (rect.size.area() < hsvImg.size[0] * hsvImg.size[1] / 1000000.0)
+        MyRotatedRect resultRect;
+        if (isLedLight(contour, hsvImg, resultRect))
         {
-            continue;
-        }
-        if (isLedLight(rect, hsvImg))
-        {
-            lights.push_back(rect);
+            lights.push_back(resultRect);
         }
     }
 
     return lights;
 }
 
-inline float euclideanDistSquare(const Point &p, const Point &q)
+bool isArmor(const Light &light0, const Light &light1)
 {
-    Point diff = p - q;
-    return diff.x * diff.x + diff.y * diff.y;
+#if 1
+    // 角度差值
+    float angleDiff = abs(light0.angleT() - light1.angleT());
+    if (angleDiff > 10) { 
+        return false; 
+    }
+#endif
+
+#if 1
+    // 长宽比差值
+    float aspectRatioDiff = abs(light0.aspectRatio() - light1.aspectRatio());
+    if (aspectRatioDiff > 5) { 
+        return false; 
+    }
+#endif
+
+#if 1
+    // 距离
+    int centerDistSquare = euclideanDistSquare(light0.center, light1.center);
+    float avgheight = (light0.height() + light1.height()) / 2;
+    double distRatioSquare = centerDistSquare / avgheight / avgheight;
+    if (distRatioSquare < 3 || distRatioSquare > 12) { 
+        return false; 
+    }
+#endif
+
+#if 1
+    // x轴, y轴距离
+    int xDist = abs(light0.center.x - light1.center.x);
+    int yDist = abs(light0.center.y - light1.center.y);
+    if (xDist < 2 * avgheight || yDist > 2 * avgheight) { 
+        return false; 
+    }
+#endif
+
+    return true;
 }
 
-vector<Armor> findArmor(const vector<MyRotatedRect> &lights)
+/**
+ * @brief 从一堆灯条里面找出装甲板
+ * 
+ * @param lights
+ * @return vector<Armor> 
+ */
+vector<Armor> findArmor(vector<Light> &lights)
 {
     vector<Armor> armors;
     for (int i = 0; i < lights.size(); i++)
     {
-        for (int j = i + 1; j < lights.size(); j++)
+        auto& light0 = lights[i];
+        if (light0.belongTo) { 
+            continue; 
+        }
+
+        for (int j = i + 1; j < lights.size(); j++) 
         {
-            auto light0 = lights[i], light1 = lights[j];
-
-            float angleDiff = abs(light0.angleT() - light1.angleT());
-            if (angleDiff > 5)
-            {
-                continue;
+            auto& light1 = lights[j];
+            if (light1.belongTo) {
+                continue; 
             }
 
-            float aspectRatioDiff = abs(light0.aspectRatio() - light1.aspectRatio());
-            if (aspectRatioDiff > 5)
-            {
-                continue;
+            if (isArmor(light0, light1)) {
+                float avgheight = (light0.height() + light1.height()) / 2;
+                armors.emplace_back((light0.center + light1.center) / 2,
+                    Size(avgheight * 2, avgheight * 2),
+                    -(light0.angleT() + light1.angleT()) / 2);
+                auto back = armors.back();
+                back.addLight(light0);
+                back.addLight(light1);
+                break;
             }
-
-            float centerDistSquare = euclideanDistSquare(light0.center, light1.center);
-            float avgheight = (light0.height() + light1.height()) / 2;
-            float avgheightSquare = avgheight * avgheight;
-            if (centerDistSquare / avgheightSquare > 16)
-            {
-                continue;
-            }
-            armors.emplace_back((light0.center + light1.center) / 2,
-                                Size(avgheight * 3, avgheight * 2),
-                                light0.angle);
-            armors.back().lights.push_back(light0);
-            armors.back().lights.push_back(light1);
         }
     }
     return armors;
 }
 
-vector<vector<Armor>> detect(Mat &img)
+/**
+ * @brief 识别总函数
+ * 
+ * @param img 原图
+ * @param lights 返回值
+ * @param armors 返回值
+ */
+void detect(Mat &img, vector<vector<Light>>& lights, vector<vector<Armor>>& armors)
 {
     Mat hsvImg;
     cvtColor(img, hsvImg, COLOR_BGR2HSV);
 
-    vector<MyRotatedRect> lights[] = {findLights(hsvImg, Scalar{12, 25, 229}, Scalar{25, 255, 255}),
-                                      findLights(hsvImg, Scalar{85, 0, 178}, Scalar{110, 153, 255})};
+    lights = {findLights(hsvImg, Scalar{12, 25, 229}, Scalar{25, 255, 255}),
+              findLights(hsvImg, Scalar{85, 0, 178}, Scalar{110, 153, 255})};
 
-    for (auto &&light : lights[0])
-    {
-        light.draw(img, Scalar(255, 255, 0), 3);
-    }
-    for (auto &&light : lights[1])
-    {
-        light.draw(img, Scalar(255, 0, 255), 3);
-    }
-
-    vector<vector<Armor>> armors = {findArmor(lights[0]),
-                                    findArmor(lights[1])};
-
-    for (auto &&armor : armors[0])
-    {
-        armor.draw(img, Scalar(255, 255, 0), 3);
-    }
-    for (auto &&armor : armors[1])
-    {
-        armor.draw(img, Scalar(255, 0, 255), 3);
-    }
-
-    return armors;
+    armors = {findArmor(lights[0]), findArmor(lights[1])};
 }
