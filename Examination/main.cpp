@@ -41,6 +41,18 @@ void CallBack_Demo(int, void*)
 }
 
 /****************************************
+函数名：getCurrentTime
+功能：
+    取得当前程序运行时间
+****************************************/
+long getCurrentTime()
+{
+    struct timeval tv;
+    gettimeofday(&tv, NULL);
+    return tv.tv_sec * 1000 + tv.tv_usec / 1000;
+}
+
+/****************************************
 函数名：get_hsv_range
 功能：
     对于读入的图片，动态调整HSV的阈值范围
