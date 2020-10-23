@@ -5,9 +5,24 @@
 #include <functional>
 #include <vector>
 #include <cmath>
+using namespace cv;
+using namespace std;
 
 //定义了一个矩形列表，每一维度定义了一个矩形，矩形的每一维度是顺时针方向的四个点
 typedef std::vector<std::vector<cv::Point2f>> RectAreaList;
+
+struct Data
+{
+    double pitch;
+    double yaw;
+    double distance;
+};
+
+enum class Mode
+{
+    RED,
+    BLUE
+};
 
 /*
 @brief 用来显示图片，主要是方便以一定大小进行显示
@@ -195,9 +210,9 @@ bool rectCmp(const std::vector<cv::Point2f> &r1, const std::vector<cv::Point2f> 
 */
 bool selectMethod(std::vector<cv::Point2f> &get_list)
 {
-    constexpr double div_high = 15;         //长宽比上界
-    constexpr double div_low = 3.1;         //长宽比下界
-    constexpr double square_low = 800;      //面积下界
+    constexpr double div_high = 15;     //长宽比上界
+    constexpr double div_low = 3.1;     //长宽比下界
+    constexpr double square_low = 800;  //面积下界
     const double sin_low = sqrt(2) / 2; //倾斜的sin下界
     //获得长边和短边
     double max_value = std::max(pointDis(get_list[0], get_list[1]), pointDis(get_list[1], get_list[2]));
@@ -241,7 +256,7 @@ bool selectMethod(std::vector<cv::Point2f> &get_list)
 @param color：scalar形式的三通道颜色
 @param thickness：粗细
 */
-void drawRectInImg(cv::Mat &img, RectAreaList &rect_list, const cv::Scalar &color, const int thickness)
+void paintRectInImg(cv::Mat &img, RectAreaList &rect_list, const cv::Scalar &color, const int thickness)
 {
     for (auto &it : rect_list)
     {
@@ -260,9 +275,9 @@ void drawRectInImg(cv::Mat &img, RectAreaList &rect_list, const cv::Scalar &colo
 bool judgeWhite(cv::Mat &img, const cv::Point2f &p)
 {
     //检测范围为2*range的正方形区域
-    constexpr int range = 10;
+    constexpr int range = 200;
     //白色方框的比例阈值
-    constexpr double min_limit = 0.8;
+    constexpr double min_limit = 0.0;
     int x = static_cast<int>(p.x);
     int y = static_cast<int>(p.y);
     int cnt = 0;
@@ -277,7 +292,55 @@ bool judgeWhite(cv::Mat &img, const cv::Point2f &p)
             }
         }
     }
-    if (static_cast<double>(cnt) / range * range >= min_limit)
+    cout<<static_cast<double>(cnt) / (4*range * range)<<endl;
+    if (static_cast<double>(cnt) / (4*range * range) >= min_limit)
+    {
+        return true;
+    }
+    return false;
+}
+
+/*
+@brief 根据二值化图像判断某一个点的周围一小部分是否为红色或者蓝色，由mode判断
+@param img：图片
+@param p：点
+*/
+bool judgeMode(cv::Mat &img, const cv::Point2f &p, Mode mode)
+{
+    //检测范围为2*range的正方形区域
+    constexpr int range = 25;
+    //符合颜色的阈值
+    constexpr double min_limit = 0.7;
+    int x = static_cast<int>(p.x);
+    int y = static_cast<int>(p.y);
+    int cnt = 0;
+    for (int i = -range; i < range; i++)
+    {
+        for (int j = -range; j < range; j++)
+        {
+            //防止越界
+            if (y + i < img.rows && y + i > 0 && x + i < img.cols && x + i > 0)
+            {
+                //红色判断第三通道，蓝色判断第一通道，mat颜色的存储方式为bgr
+                if (mode == Mode::RED)
+                {
+                    if (img.at<Vec3b>(y + i, x + j)[2] > 170)
+                    {
+                        cnt++;
+                    }
+                }
+                else if (mode == Mode::BLUE)
+                {
+                    if (img.at<Vec3b>(y + i, x + j)[0] > 170)
+                    {
+                        cnt++;
+                    }
+                }
+            }
+        }
+    }
+    //cout << static_cast<double>(cnt) / (4 * range * range) << endl;
+    if (static_cast<double>(cnt) / (4 * range * range) >= min_limit)
     {
         return true;
     }
@@ -311,6 +374,7 @@ RectAreaList matchRect(cv::Mat &bin_img, const RectAreaList &rect_list)
         否则，匹配2号3号
         当假如配对到4号5号时，则会出现5号的x小，这种情况一定不存在，因为灯条已经按照y和x的顺序排好了序，所以这种不予匹配
         */
+        // cout << judgeWhite(bin_img, midPoint(p1, p2)) << endl;
         if (p1.x < p2.x && judgeWhite(bin_img, midPoint(p1, p2)))
         {
             match_rect.push_back(rect_list[i]);
@@ -338,14 +402,34 @@ RectAreaList getPlateList(const RectAreaList &match_list)
     for (size_t i = 0; i < match_list.size(); i += 2)
     {
         std::vector<cv::Point2f> tmp_ve;
-        double p1_max_value = fac * std::max(pointDis(match_list[i][0], match_list[i][1]), pointDis(match_list[i][1], match_list[i][2]));
-        double p2_max_value = fac * std::max(pointDis(match_list[i + 1][0], match_list[i + 1][1]), pointDis(match_list[i + 1][1], match_list[i + 1][2]));
-        auto p1 = rectCenter(match_list[i]);
-        auto p2 = rectCenter(match_list[i + 1]);
-        tmp_ve.push_back(cv::Point2f(p1.x, p1.y - p1_max_value));
-        tmp_ve.push_back(cv::Point2f(p2.x, p2.y - p2_max_value));
-        tmp_ve.push_back(cv::Point2f(p2.x, p2.y + p2_max_value));
-        tmp_ve.push_back(cv::Point2f(p1.x, p1.y + p1_max_value));
+        if (pointDis(match_list[i][0], match_list[i][1]) < pointDis(match_list[i][1], match_list[i][2]))
+        {
+            tmp_ve.push_back(midPoint(match_list[i][0], match_list[i][1]));
+            tmp_ve.push_back(midPoint(match_list[i][2], match_list[i][3]));
+        }
+        else
+        {
+            tmp_ve.push_back(midPoint(match_list[i][1], match_list[i][2]));
+            tmp_ve.push_back(midPoint(match_list[i][0], match_list[i][3]));
+        }
+        if (pointDis(match_list[i + 1][0], match_list[i + 1][1]) < pointDis(match_list[i + 1][1], match_list[i + 1][2]))
+        {
+            tmp_ve.push_back(midPoint(match_list[i + 1][0], match_list[i + 1][1]));
+            tmp_ve.push_back(midPoint(match_list[i + 1][2], match_list[i + 1][3]));
+        }
+        else
+        {
+            tmp_ve.push_back(midPoint(match_list[i + 1][1], match_list[i + 1][2]));
+            tmp_ve.push_back(midPoint(match_list[i + 1][0], match_list[i + 1][3]));
+        }
+        // double p1_max_value = fac * std::max(pointDis(match_list[i][0], match_list[i][1]), pointDis(match_list[i][1], match_list[i][2]));
+        // double p2_max_value = fac * std::max(pointDis(match_list[i + 1][0], match_list[i + 1][1]), pointDis(match_list[i + 1][1], match_list[i + 1][2]));
+        // auto p1 = rectCenter(match_list[i]);
+        // auto p2 = rectCenter(match_list[i + 1]);
+        // tmp_ve.push_back(cv::Point2f(p1.x, p1.y - p1_max_value));
+        // tmp_ve.push_back(cv::Point2f(p2.x, p2.y - p2_max_value));
+        // tmp_ve.push_back(cv::Point2f(p2.x, p2.y + p2_max_value));
+        // tmp_ve.push_back(cv::Point2f(p1.x, p1.y + p1_max_value));
         plate_list.push_back(tmp_ve);
     }
     return plate_list;
@@ -360,61 +444,129 @@ RectAreaList getPlateList(const RectAreaList &match_list)
 void showDemo(const cv::String name, cv::Mat &gray_img, RectAreaList &rect_list, const cv::Size &size)
 {
     cv::Mat &&demo = grayToBin(gray_img, 255);
-    drawRectInImg(demo, rect_list, cv::Scalar(255, 255, 255), 2);
+    paintRectInImg(demo, rect_list, cv::Scalar(255, 255, 255), 2);
     showImg(name, demo, size);
 }
 
-int main()
+//以下为实现的三个接口函数
+
+//基于main函数改编而来
+RectAreaList processImg(Mat &img,int& num_light)
 {
-    //图片路径
-    const cv::String img_get = "test.jpg";
+
     //窗口大小，根据给定图片设置了3：2大小
     constexpr int img_width = 900;
     const cv::Size img_size(img_width, img_width / 3 * 2);
     //灯条二值化阈值,tv：threshold_value
-    constexpr int tv_light = 215;
+    constexpr int tv_light = 230;
     //数字二值化阈值
-    constexpr int tv_num = 100;
+    constexpr int tv_num = 130;
     //画框的颜色和粗细
     const auto rect_color = cv::Scalar(242, 250, 247);
     const int rect_thickness = 10;
-    //输出路径
-    const cv::String img_out = "armor.jpg";
+    //此时识别的是的灯条类型
+    const Mode mode = Mode::RED;
 
     //读取图片并且进行判断,返回右值，减少拷贝
-    cv::Mat &&img = readImg(img_get);
+    //cv::Mat &&img = readImg(img_get);
 
     //获取灰度图片
     cv::Mat &&gray_img = normalToGray(img);
     //获取灯条二值化图片
     cv::Mat &&bin_img_light = grayToBin(gray_img, tv_light);
-    showImg("灯条二值化图片", bin_img_light, img_size);
+    //showImg("灯条二值化图片", bin_img_light, img_size);
     //获取数字二值化图片
     cv::Mat &&bin_img_num = grayToBin(gray_img, tv_num);
-    showImg("数字二值化图片", bin_img_num, img_size);
+    //showImg("数字二值化图片", bin_img_num, img_size);
 
     //获取灯条轮廓
     RectAreaList &&rect_area = getRectArea(bin_img_light);
-    showDemo("灯条轮廓", gray_img, rect_area, img_size);
+    //showDemo("灯条轮廓", gray_img, rect_area, img_size);
 
     //筛选轮廓
-    RectAreaList &&selected_rect_area = selectRectArea(rect_area, selectMethod);
-    showDemo("筛选轮廓", gray_img, selected_rect_area, img_size);
-    //对轮廓进行排序
+    RectAreaList &&sra = selectRectArea(rect_area, selectMethod);
+    
+
+    //二次筛选，选择符合颜色的灯条
+    RectAreaList selected_rect_area;
+    for (auto &it : sra)
+    {
+        //筛选
+        if (judgeMode(img, rectCenter(it), mode))
+        {
+            selected_rect_area.push_back(it);
+            //cout << (int)img.at<Vec2b>(rectCenter(it).y, rectCenter(it).x)[0]<<endl;
+        }
+    }
+    num_light=selected_rect_area.size();
+    //showDemo("筛选轮廓", gray_img, sra, img_size);
     std::sort(selected_rect_area.begin(), selected_rect_area.end(), rectCmp);
     //获得配对以后的矩形框
     RectAreaList &&match_rect_list = matchRect(bin_img_num, selected_rect_area);
-    showDemo("灯条与配对结果", gray_img, match_rect_list, img_size);
+    //showDemo("灯条与配对结果", gray_img, match_rect_list, img_size);
+
     //获得装甲板矩形框
     RectAreaList &&plate_list = getPlateList(match_rect_list);
-    showDemo("框选装甲板", gray_img, plate_list, img_size);
+
+    //showDemo("框选装甲板", gray_img, plate_list, img_size);
     //在原图片上绘制矩形框
-    drawRectInImg(img, selected_rect_area, rect_color, rect_thickness);
-    drawRectInImg(img, plate_list, rect_color, rect_thickness);
-    showImg("result", img, img_size);
-    cv::imwrite(img_out, img);
+    paintRectInImg(img, selected_rect_area, rect_color, rect_thickness);
+    //paintRectInImg(img, plate_list, rect_color, rect_thickness);
+    //showImg("result", img, img_size);
+    return plate_list;
+    //cv::imwrite(img_out, img);
+}
 
-    cv::waitKey();
+// vector<vector<Point2f>> processImg(Mat &inputimage, bool ProcessRed = false)
+// {
+//     return solve_red(inputimage, ProcessRed == 0);
+// }
 
-    return 0;
+/*
+@brief 根据旋转向量和平移向量计算欧拉角
+@param rotCameraVector：旋转向量
+@param transCameraVector：平移向量
+@param data: 
+*/
+Data getInformation(cv::Mat &rotCameraVector, cv::Mat &transCameraVector)
+{
+    cv::Mat rotCameraMatrix = cv::Mat(3, 3, CV_64FC1); //临时旋转矩阵
+
+    cv::Mat projMatrix = cv::Mat(3, 4, CV_64FC1);   //in
+    cv::Mat cameraMatrix = cv::Mat(3, 3, CV_64FC1); //out1
+    cv::Mat rotMatrix = cv::Mat(3, 3, CV_64FC1);    //out2
+    cv::Mat transVect = cv::Mat(4, 1, CV_64FC1);    //ou3
+    cv::Vec3d eulerAngles;                          //out4
+    double PI = 3.1415926;
+    cv::Rodrigues(rotCameraVector, rotCameraMatrix); //将旋转向量转化为旋转矩阵
+    /*double y_rot = asin(rotCameraMatrix.at<double>(2, 0));
+    double x_rot = acos(rotCameraMatrix.at<double>(2, 2) / cos(y_rot));
+    double z_rot = acos(rotCameraMatrix.at<double>(0, 0) / cos(y_rot));
+    double y_rot_angle = y_rot * (180 / PI);
+    double x_rot_angle = x_rot * (180 / PI);
+    double z_rot_angle = z_rot * (180 / PI);*/
+    cv::hconcat(rotCameraMatrix, transCameraVector, projMatrix); //竖直拼接旋转矩阵和平移向量
+
+    decomposeProjectionMatrix(projMatrix, cameraMatrix, rotMatrix, transVect,
+                              cv::noArray(), cv::noArray(), cv::noArray(),
+                              eulerAngles); //计算欧拉角
+    double euclideanDistance = sqrt(transCameraVector.at<double>(0, 0) * transCameraVector.at<double>(0, 0) +
+                                    transCameraVector.at<double>(1, 0) * transCameraVector.at<double>(1, 0) +
+                                    transCameraVector.at<double>(2, 0) * transCameraVector.at<double>(2, 0));
+    Data data;
+    data.pitch = eulerAngles[0];
+    data.yaw = eulerAngles[1];
+    /*data.pitch = x_rot_angle;
+    data.yaw = y_rot_angle;*/
+    data.distance = euclideanDistance;
+    return data;
+}
+//一个简单的在图片上显示信息的代码
+void drawDataInImg(Mat &img, Data &info, Point2f &point)
+{
+    int gap0 = 40;
+    int gap = 40;
+    putText(img, "pitch:" + to_string(info.pitch), Point2f(point.x + gap0, point.y + gap0), FONT_HERSHEY_COMPLEX, 0.6, cv::Scalar(0, 255, 255));
+    putText(img, "yaw:" + to_string(info.yaw), Point2f(point.x + gap0, point.y + gap0 + gap), FONT_HERSHEY_COMPLEX, 0.6, cv::Scalar(0, 255, 255));
+    putText(img, "distance:" + to_string(info.distance), Point2f(point.x + gap0, point.y + gap0 + 2 * gap), FONT_HERSHEY_COMPLEX, 0.6, cv::Scalar(0, 255, 255));
 }
